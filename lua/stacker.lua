@@ -102,12 +102,14 @@ M.load = function()
   for i = 1, #items do
     local item = items[i]
     vim.cmd('edit ' .. item["name"])
-    local line = item["line"]
-    local max_line = tonumber(vim.fn.system({ 'wc', '-l', vim.fn.expand('%') }):match('%d+'))
-    if line > max_line then
-      line = max_line
+    if M.opts.load_cursor_position then
+      local line = item["line"]
+      local max_line = tonumber(vim.fn.system({ 'wc', '-l', vim.fn.expand('%') }):match('%d+'))
+      if line > max_line then
+        line = max_line
+      end
+      vim.api.nvim_win_set_cursor(0, {line, 0})
     end
-    vim.api.nvim_win_set_cursor(0, {line, 0})
   end
 end
 
@@ -153,6 +155,7 @@ M.setup = function(options)
     separator = '  ',
     show_tabline = true,
     storage_path = vim.fn.stdpath('data') .. '/stacker.json',
+    load_cursor_position = false,
   }, options or {})
 
   -- autocmds
