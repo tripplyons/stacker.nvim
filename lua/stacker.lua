@@ -94,6 +94,9 @@ M.load_all = function()
 end
 
 M.load = function()
+  if not M.opts.use_storage then
+    return
+  end
   local contents = M.load_all()
   local items = contents[vim.fn.getcwd()]
   if items == nil then
@@ -114,6 +117,9 @@ M.load = function()
 end
 
 M.save = function()
+  if not M.opts.use_storage then
+    return
+  end
   local contents = M.load_all()
   local session = {}
   for i = 1, #M.buffer_history do
@@ -156,6 +162,7 @@ M.setup = function(options)
     show_tabline = true,
     storage_path = vim.fn.stdpath('data') .. '/stacker.json',
     load_cursor_position = false,
+    use_storage = false,
   }, options or {})
 
   -- autocmds
