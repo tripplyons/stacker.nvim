@@ -1,5 +1,14 @@
 local M = {}
 
+local default_opts = {
+  max_buffers = 10,
+  separator = '  ',
+  show_tabline = true,
+  storage_path = vim.fn.stdpath('data') .. '/stacker.json',
+  load_cursor_position = true,
+  use_storage = true,
+}
+
 -- buffer management
 M.buffer_history = {}
 M.opts = {}
@@ -156,14 +165,7 @@ M.on_buffer_write = function()
 end
 
 M.setup = function(options)
-  M.opts = vim.tbl_extend('force', {
-    max_buffers = 10,
-    separator = '  ',
-    show_tabline = true,
-    storage_path = vim.fn.stdpath('data') .. '/stacker.json',
-    load_cursor_position = false,
-    use_storage = false,
-  }, options or {})
+  M.opts = vim.tbl_extend('force', default_opts, options or {})
 
   -- autocmds
 
@@ -187,8 +189,8 @@ M.setup = function(options)
     callback = M.on_delete,
   })
 
-  -- on cursor hold
-  vim.api.nvim_create_autocmd('CursorHold', {
+  -- on vim leave
+  vim.api.nvim_create_autocmd('VimLeavePre', {
     group = 'stacker',
     pattern = '*',
     callback = M.save,
@@ -200,9 +202,6 @@ M.setup = function(options)
     pattern = '*',
     callback = M.on_buffer_write
   })
-
-  -- every second
-  -- vim.api.nvim_create_autocmd('CursorHold', {
 
   if M.opts.show_tabline then
     vim.opt.showtabline = 2

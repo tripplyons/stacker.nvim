@@ -4,10 +4,6 @@ Quickly access and manage recently used neovim buffers
 
 Inspired by [harpoon](https://github.com/ThePrimeagen/harpoon)
 
-## Note
-
-stacker.nvim is still under development. Some features such as session storage will encounter errors in some cases.
-
 ## Installation
 
 ### With lazy.nvim
@@ -54,8 +50,8 @@ end)
   separator = '  ',
   show_tabline = true,
   storage_path = vim.fn.stdpath('data') .. '/stacker.json',
-  load_cursor_position = false,
-  use_storage = false,
+  load_cursor_position = true,
+  use_storage = true,
 }
 ```
 
