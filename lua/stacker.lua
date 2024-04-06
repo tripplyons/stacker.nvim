@@ -106,6 +106,9 @@ M.load = function()
   if not M.opts.use_storage then
     return
   end
+
+  local current_buffer = M.get_buffer()
+
   local contents = M.load_all()
   local items = contents[vim.fn.getcwd()]
   if items == nil then
@@ -122,6 +125,10 @@ M.load = function()
       end
       vim.api.nvim_win_set_cursor(0, {line, 0})
     end
+  end
+
+  if current_buffer then
+    vim.cmd('buffer ' .. current_buffer.index)
   end
 end
 
