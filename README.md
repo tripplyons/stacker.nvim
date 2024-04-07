@@ -50,7 +50,7 @@ end)
   separator = '  ',
   show_tabline = true,
   storage_path = vim.fn.stdpath('data') .. '/stacker.json',
-  load_cursor_position = true,
+  load_cursor_position = false, # a bit buggy
   use_storage = true,
 }
 ```
