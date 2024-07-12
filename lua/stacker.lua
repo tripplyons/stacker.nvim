@@ -13,6 +13,25 @@ local default_opts = {
 M.buffer_history = {}
 M.opts = {}
 
+M.filter = function()
+  local all_bufs = vim.api.nvim_list_bufs()
+  local open_bufs = {}
+  for i = 1, #all_bufs do
+    if vim.api.nvim_buf_is_loaded(all_bufs[i]) then
+      table.insert(open_bufs, all_bufs[i])
+    end
+  end
+
+  local filtered = {}
+  for i = 1, #M.buffer_history do
+    local buffer = M.buffer_history[i]
+    if vim.tbl_contains(open_bufs, buffer.index) then
+      table.insert(filtered, buffer)
+    end
+  end
+  M.buffer_history = filtered
+end
+
 M.get_buffer = function()
   local buffer_type = vim.api.nvim_buf_get_option(0, 'buftype')
   if buffer_type ~= '' then
@@ -78,7 +97,6 @@ M.on_delete = function(buffer)
 end
 
 M.navigate = function(index)
-  M.save()
   if index > #M.buffer_history + 1 then
     return
   end
@@ -87,6 +105,8 @@ M.navigate = function(index)
     return
   end
   vim.cmd('buffer ' .. buffer.index)
+
+  M.save()
 end
 
 M.load_all = function()
@@ -133,6 +153,7 @@ M.load = function()
 end
 
 M.save = function()
+  M.filter()
   if not M.opts.use_storage then
     return
   end
@@ -208,6 +229,20 @@ M.setup = function(options)
     group = 'stacker',
     pattern = '*',
     callback = M.on_buffer_write
+  })
+
+  -- on buffer leave
+  vim.api.nvim_create_autocmd('BufLeave', {
+    group = 'stacker',
+    pattern = '*',
+    callback = M.save
+  })
+
+  -- on cursor hold
+  vim.api.nvim_create_autocmd('CursorHold', {
+    group = 'stacker',
+    pattern = '*',
+    callback = M.save
   })
 
   if M.opts.show_tabline then
