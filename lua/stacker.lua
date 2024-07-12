@@ -6,7 +6,7 @@ local default_opts = {
   show_tabline = true,
   storage_path = vim.fn.stdpath('data') .. '/stacker.json',
   load_cursor_position = false,
-  use_storage = true,
+  use_storage = false,
 }
 
 -- buffer management
