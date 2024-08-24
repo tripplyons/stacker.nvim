@@ -186,7 +186,7 @@ M.on_buffer_write = function()
     return
   end
   -- update buffer name if it has changed
-  if buffer.name ~= M.buffer_history[#M.buffer_history].name then
+  if #M.buffer_history == 0 or buffer.name ~= M.buffer_history[#M.buffer_history].name then
     M.on_enter()
     vim.cmd('redrawtabline')
   end
