@@ -18,7 +18,13 @@ M.filter = function()
   local open_bufs = {}
   for i = 1, #all_bufs do
     if vim.api.nvim_buf_is_loaded(all_bufs[i]) then
-      table.insert(open_bufs, all_bufs[i])
+      local name = vim.api.nvim_buf_get_name(all_bufs[i])
+      -- only include files and new buffers
+      if #name > 0 and name:sub(1, 1) == '/' then
+        table.insert(open_bufs, all_bufs[i])
+      elseif #name == 0 then
+        table.insert(open_bufs, all_bufs[i])
+      end
     end
   end
 
@@ -73,7 +79,11 @@ M.on_enter = function()
 end
 
 M.clear_history = function()
-  M.buffer_history = {}
+  -- M.buffer_history = {}
+  while #M.buffer_history > 0 do
+    vim.cmd('bdelete ' .. M.buffer_history[1].index)
+    table.remove(M.buffer_history, 1)
+  end
   M.on_enter()
   vim.cmd('redrawtabline')
 end
