@@ -5,11 +5,12 @@ local default_opts = {
 	separator = "  ",
 	show_tabline = true,
 	storage_path = vim.fn.stdpath("data") .. "/stacker.json",
-	load_cursor_position = false,
-	use_storage = false,
+	load_cursor_position = true,
+	use_storage = true,
 }
 
 -- buffer management
+M.loaded = false
 M.buffer_history = {}
 M.opts = {}
 
@@ -75,16 +76,16 @@ M.on_enter = function()
 		table.remove(M.buffer_history, 1)
 	end
 
-	M.save()
+	M.save_storage()
+
+	vim.cmd("redrawtabline")
 end
 
 M.clear_history = function()
-	-- M.buffer_history = {}
-	while #M.buffer_history > 0 do
-		vim.cmd("bdelete " .. M.buffer_history[1].index)
-		table.remove(M.buffer_history, 1)
+	for _ = 1, #M.buffer_history do
+		vim.api.nvim_buf_delete(M.buffer_history[1].index, {})
 	end
-	M.on_enter()
+
 	vim.cmd("redrawtabline")
 end
 
@@ -102,8 +103,6 @@ M.on_delete = function(buffer)
 	if index ~= -1 then
 		table.remove(M.buffer_history, index)
 	end
-
-	M.save()
 end
 
 M.navigate = function(index)
@@ -116,10 +115,10 @@ M.navigate = function(index)
 	end
 	vim.cmd("buffer " .. buffer.index)
 
-	M.save()
+	M.save_storage()
 end
 
-M.load_all = function()
+M.load_storage_contents = function()
 	local file = io.open(M.opts.storage_path, "r")
 	if file == nil then
 		return {}
@@ -129,19 +128,19 @@ M.load_all = function()
 		return {}
 	end
 	file:close()
-	return vim.fn.json_decode(contents)
+	return vim.json.decode(contents)
 end
 
-M.load = function()
+M.load_storage = function()
 	if not M.opts.use_storage then
+		M.loaded = true
 		return
 	end
 
-	local current_buffer = M.get_buffer()
-
-	local contents = M.load_all()
+	local contents = M.load_storage_contents()
 	local items = contents[vim.fn.getcwd()]
 	if items == nil then
+		M.loaded = true
 		return
 	end
 	for i = 1, #items do
@@ -153,21 +152,22 @@ M.load = function()
 			if line > max_line then
 				line = max_line
 			end
-			vim.api.nvim_win_set_cursor(0, { line, 0 })
+			vim.cmd("normal! " .. line .. "gg0")
 		end
 	end
 
-	if current_buffer then
-		vim.cmd("buffer " .. current_buffer.index)
-	end
+	M.loaded = true
 end
 
-M.save = function()
+M.save_storage = function()
 	M.filter()
 	if not M.opts.use_storage then
 		return
 	end
-	local contents = M.load_all()
+	if not M.loaded then
+		return
+	end
+	local contents = M.load_storage_contents()
 	local session = {}
 	for i = 1, #M.buffer_history do
 		local item = M.buffer_history[i]
@@ -183,7 +183,7 @@ M.save = function()
 	if file == nil then
 		return
 	end
-	local result = file:write(vim.fn.json_encode(contents))
+	local result = file:write(vim.json.encode(contents))
 	if result == nil then
 		return
 	end
@@ -231,7 +231,7 @@ M.setup = function(options)
 	vim.api.nvim_create_autocmd("VimLeavePre", {
 		group = "stacker",
 		pattern = "*",
-		callback = M.save,
+		callback = M.save_storage,
 	})
 
 	-- on buffer write
@@ -245,22 +245,29 @@ M.setup = function(options)
 	vim.api.nvim_create_autocmd("BufLeave", {
 		group = "stacker",
 		pattern = "*",
-		callback = M.save,
+		callback = M.save_storage,
 	})
 
 	-- on cursor hold
 	vim.api.nvim_create_autocmd("CursorHold", {
 		group = "stacker",
 		pattern = "*",
-		callback = M.save,
+		callback = M.save_storage,
 	})
+
+	-- on directory change
+	vim.api.nvim_create_autocmd("DirChanged", {
+		group = "stacker",
+		pattern = "*",
+		callback = M.load_storage,
+	})
+
+	vim.defer_fn(M.load_storage, 0)
 
 	if M.opts.show_tabline then
 		vim.opt.showtabline = 2
 		vim.o.tabline = "%!v:lua.require'stacker'.status()"
 	end
-
-	M.load()
 end
 
 M.list_buffers = function()

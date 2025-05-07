@@ -1,26 +1,17 @@
 # stacker.nvim
 
-Quickly access and manage recently used neovim buffers
+Access recent Neovim buffers, ordered by most recently used
 
 Inspired by [harpoon](https://github.com/ThePrimeagen/harpoon)
 
 ## Installation
 
-### With lazy.nvim
-
-Add the following to your lazy config:
-
-```lua
-{
-  "tripplyons/stacker.nvim",
-}
-```
-
-Then, call the setup command, and create keybinds:
+Call the setup function and create keybindings:
 
 ```lua
 local stacker = require('stacker')
-stacker.setup({})
+local opts = {}
+stacker.setup(opts)
 
 -- <leader>1 will navigate to the most recently used buffer, <leader>2 for 2nd most recently used buffer, etc.
 for i = 1, 9 do
@@ -34,10 +25,13 @@ vim.keymap.set('n', '<leader>0', function()
   stacker.navigate(10)
 end)
 
--- <leader>dh will delete the buffer history
+-- <leader>dh will delete the buffer history for the current directory
 vim.keymap.set('n', '<leader>dh', function()
   stacker.clear_history()
 end)
+
+-- load the saved buffer history
+stacker.load()
 ```
 
 ## Customization
@@ -50,8 +44,8 @@ end)
   separator = '  ',
   show_tabline = true,
   storage_path = vim.fn.stdpath('data') .. '/stacker.json',
-  load_cursor_position = false, # a bit buggy
-  use_storage = false,
+  load_cursor_position = true, # go to the line where the buffer was last left, if using storage
+  use_storage = true, # store the buffer history in storage_path
 }
 ```
 
