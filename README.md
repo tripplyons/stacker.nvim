@@ -4,9 +4,25 @@ Access recent Neovim buffers, ordered by most recently used
 
 Inspired by [harpoon](https://github.com/ThePrimeagen/harpoon)
 
+## Demo Video
+
+[![Video Screenshot](video-screenshot.png)](https://www.youtube.com/watch?v=d6I0_qKfosg)
+
 ## Installation
 
-Call the setup function and create keybindings:
+First install the plugin (using [lazy.nvim](https://github.com/folke/lazy.nvim), for example):
+
+```lua
+{
+  "tripplyons/stacker.nvim",
+  event = "BufEnter",
+  config = function()
+    -- your config here
+  end
+}
+```
+
+Then call the setup function and create your own keybindings in your config:
 
 ```lua
 local stacker = require('stacker')
@@ -44,7 +60,7 @@ stacker.load()
   separator = '  ',
   show_tabline = true,
   storage_path = vim.fn.stdpath('data') .. '/stacker.json',
-  load_cursor_position = true, # go to the line where the buffer was last left, if using storage
+  load_cursor_position = false, # go to the line where the buffer was last left, if using storage
   use_storage = true, # store the buffer history in storage_path
 }
 ```
