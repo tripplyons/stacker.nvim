@@ -12,6 +12,7 @@ local default_opts = {
 -- buffer management
 M.loaded = false
 M.buffer_history = {}
+M.current_buffer = nil
 M.opts = {}
 
 M.filter = function()
@@ -20,11 +21,13 @@ M.filter = function()
 	for i = 1, #all_bufs do
 		if vim.api.nvim_buf_is_loaded(all_bufs[i]) then
 			local name = vim.api.nvim_buf_get_name(all_bufs[i])
-			-- only include files and new buffers
-			if #name > 0 and name:sub(1, 1) == "/" then
-				table.insert(open_bufs, all_bufs[i])
-			elseif #name == 0 then
-				table.insert(open_bufs, all_bufs[i])
+			local buftype = vim.api.nvim_buf_get_option(all_bufs[i], "buftype")
+			if buftype == "" then
+				if #name > 0 and name:sub(1, 1) == "/" then
+					table.insert(open_bufs, all_bufs[i])
+				elseif #name == 0 then
+					table.insert(open_bufs, all_bufs[i])
+				end
 			end
 		end
 	end
@@ -40,15 +43,16 @@ M.filter = function()
 end
 
 M.get_buffer = function()
-	local buffer_type = vim.api.nvim_buf_get_option(0, "buftype")
+	local index = vim.api.nvim_get_current_buf()
+	local name = vim.api.nvim_buf_get_name(index)
+	local buffer_type = vim.api.nvim_buf_get_option(index, "buftype")
 	if buffer_type ~= "" then
 		return nil
 	end
-	local index = vim.api.nvim_get_current_buf()
-	local name = vim.api.nvim_buf_get_name(index)
 	if name == nil then
 		name = ""
 	end
+	M.current_buffer = index
 	return {
 		index = index,
 		name = name,
@@ -56,6 +60,7 @@ M.get_buffer = function()
 end
 
 M.on_enter = function()
+	M.filter()
 	local buffer = M.get_buffer()
 	if buffer == nil then
 		return
@@ -106,11 +111,14 @@ M.on_delete = function(buffer)
 end
 
 M.navigate = function(index)
+	M.filter()
 	if index > #M.buffer_history + 1 then
+		print("index out of range")
 		return
 	end
 	local buffer = M.buffer_history[#M.buffer_history - index]
 	if not buffer then
+		print("buffer not found")
 		return
 	end
 	vim.cmd("buffer " .. buffer.index)
@@ -145,7 +153,9 @@ M.load_storage = function()
 	end
 	for i = 1, #items do
 		local item = items[i]
-		vim.cmd("edit " .. item["name"])
+		if item["name"] ~= nil and item["name"] ~= "" then
+			vim.cmd("edit " .. item["name"])
+		end
 		if M.opts.load_cursor_position then
 			local line = item["line"]
 			local max_line = tonumber(vim.fn.system({ "wc", "-l", vim.fn.expand("%") }):match("%d+"))
@@ -271,6 +281,7 @@ M.setup = function(options)
 end
 
 M.list_buffers = function()
+	M.filter()
 	local buffer_list = {}
 	-- figure out which buffers are unnamed
 	local no_name_indices = {}
