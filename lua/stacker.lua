@@ -14,6 +14,46 @@ M.loaded = false
 M.buffer_history = {}
 M.current_buffer = nil
 M.opts = {}
+M.argv_session = false
+
+local function upsert_buffer_history(buffer)
+	if buffer == nil then
+		return
+	end
+	local index = -1
+	for i = 1, #M.buffer_history do
+		if buffer.index == M.buffer_history[i].index then
+			index = i
+			break
+		end
+	end
+	if index ~= -1 then
+		table.remove(M.buffer_history, index)
+	end
+	table.insert(M.buffer_history, buffer)
+	if #M.buffer_history > M.opts.max_buffers then
+		table.remove(M.buffer_history, 1)
+	end
+end
+
+local function add_bufnr_to_history(bufnr)
+	if bufnr == nil or not vim.api.nvim_buf_is_valid(bufnr) then
+		return
+	end
+	local buftype = vim.api.nvim_buf_get_option(bufnr, "buftype")
+	if buftype ~= "" then
+		return
+	end
+	local name = vim.api.nvim_buf_get_name(bufnr)
+	if name == nil then
+		name = ""
+	end
+	M.current_buffer = bufnr
+	upsert_buffer_history({
+		index = bufnr,
+		name = name,
+	})
+end
 
 M.filter = function()
 	local all_bufs = vim.api.nvim_list_bufs()
@@ -65,21 +105,7 @@ M.on_enter = function()
 	if buffer == nil then
 		return
 	end
-	-- find if any buffers have a matching name
-	local index = -1
-	for i = 1, #M.buffer_history do
-		if buffer.index == M.buffer_history[i].index then
-			index = i
-			break
-		end
-	end
-	if index ~= -1 then
-		table.remove(M.buffer_history, index)
-	end
-	table.insert(M.buffer_history, buffer)
-	if #M.buffer_history > M.opts.max_buffers then
-		table.remove(M.buffer_history, 1)
-	end
+	upsert_buffer_history(buffer)
 
 	M.save_storage()
 
@@ -139,7 +165,61 @@ M.load_storage_contents = function()
 	return vim.json.decode(contents)
 end
 
+local function normalize_path(path)
+	if path == nil or path == "" then
+		return ""
+	end
+	return vim.fn.fnamemodify(path, ":p")
+end
+
+local function load_file_buffer(path)
+	local normalized = normalize_path(path)
+	if normalized == "" then
+		return nil
+	end
+	local bufnr = vim.fn.bufadd(normalized)
+	vim.fn.bufload(bufnr)
+	return bufnr
+end
+
+local function load_startup_files_from_argv()
+	local argv = vim.fn.argv()
+	if #argv == 0 then
+		return false
+	end
+	local loaded_any = false
+	local loaded_bufs = {}
+	for i = 1, #argv do
+		local arg = argv[i]
+		if arg ~= nil and arg ~= "" then
+			local bufnr = load_file_buffer(arg)
+			if bufnr ~= nil then
+				table.insert(loaded_bufs, bufnr)
+				loaded_any = true
+			end
+		end
+	end
+	if loaded_any then
+		M.filter()
+		for i = 1, #loaded_bufs do
+			add_bufnr_to_history(loaded_bufs[i])
+		end
+		-- Keep the currently visible startup buffer as most-recent.
+		add_bufnr_to_history(vim.api.nvim_get_current_buf())
+		vim.cmd("redrawtabline")
+	end
+	return loaded_any
+end
+
 M.load_storage = function()
+	-- If nvim was launched with explicit file arguments, honor that set first
+	-- and avoid replacing the startup layout with storage restores.
+	if load_startup_files_from_argv() then
+		M.argv_session = true
+		M.loaded = true
+		return
+	end
+
 	if not M.opts.use_storage then
 		M.loaded = true
 		return
@@ -154,7 +234,14 @@ M.load_storage = function()
 	for i = 1, #items do
 		local item = items[i]
 		if item["name"] ~= nil and item["name"] ~= "" then
-			vim.cmd("edit " .. item["name"])
+			local bufnr = load_file_buffer(item["name"])
+			if bufnr ~= nil then
+				add_bufnr_to_history(bufnr)
+				if i == #items then
+					vim.api.nvim_set_current_buf(bufnr)
+					add_bufnr_to_history(bufnr)
+				end
+			end
 		end
 		if M.opts.load_cursor_position then
 			local line = item["line"]
@@ -171,6 +258,9 @@ end
 
 M.save_storage = function()
 	M.filter()
+	if M.argv_session then
+		return
+	end
 	if not M.opts.use_storage then
 		return
 	end
