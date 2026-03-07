@@ -16,6 +16,88 @@ M.current_buffer = nil
 M.opts = {}
 M.argv_session = false
 
+local add_bufnr_to_history
+
+local function get_buffer_kind(bufnr)
+	if bufnr == nil or not vim.api.nvim_buf_is_valid(bufnr) then
+		return nil
+	end
+	local buftype = vim.api.nvim_buf_get_option(bufnr, "buftype")
+	if buftype == "" then
+		return "file"
+	end
+	if buftype == "terminal" then
+		return "terminal"
+	end
+	return nil
+end
+
+local function is_trackable_buffer(bufnr)
+	return get_buffer_kind(bufnr) ~= nil
+end
+
+local function get_buffer_name(bufnr)
+	local name = vim.api.nvim_buf_get_name(bufnr)
+	if name == nil then
+		return ""
+	end
+	return name
+end
+
+local function get_buffer_label(buffer)
+	if buffer.kind == "terminal" then
+		local pid, command = buffer.name:match("//(%d+):(.*)$")
+		local label = vim.trim(command or "")
+		if label ~= "" then
+			label = vim.fn.fnamemodify(label, ":t")
+		else
+			label = "Terminal"
+		end
+		if pid ~= nil and pid ~= "" then
+			return "/Terminal/" .. label .. " (" .. pid .. ")"
+		end
+		return "/Terminal/" .. label .. " (" .. buffer.index .. ")"
+	end
+
+	return buffer.name
+end
+
+local function list_trackable_buffers()
+	local all_bufs = vim.api.nvim_list_bufs()
+	local tracked_bufs = {}
+	for i = 1, #all_bufs do
+		if vim.api.nvim_buf_is_valid(all_bufs[i]) and vim.fn.buflisted(all_bufs[i]) == 1 then
+			local kind = get_buffer_kind(all_bufs[i])
+			local name = get_buffer_name(all_bufs[i])
+			if kind == "file" then
+				if #name > 0 and name:sub(1, 1) == "/" then
+					table.insert(tracked_bufs, all_bufs[i])
+				elseif #name == 0 then
+					table.insert(tracked_bufs, all_bufs[i])
+				end
+			elseif kind == "terminal" then
+				table.insert(tracked_bufs, all_bufs[i])
+			end
+		end
+	end
+	return tracked_bufs
+end
+
+local function ensure_terminal_fallback(buffer)
+	if buffer == nil or buffer.kind ~= "terminal" then
+		return
+	end
+	local tracked_bufs = list_trackable_buffers()
+	if #tracked_bufs ~= 1 or tracked_bufs[1] ~= buffer.index then
+		return
+	end
+	local bufnr = vim.api.nvim_create_buf(true, false)
+	if bufnr == 0 then
+		return
+	end
+	add_bufnr_to_history(bufnr)
+end
+
 local function upsert_buffer_history(buffer)
 	if buffer == nil then
 		return
@@ -36,46 +118,25 @@ local function upsert_buffer_history(buffer)
 	end
 end
 
-local function add_bufnr_to_history(bufnr)
-	if bufnr == nil or not vim.api.nvim_buf_is_valid(bufnr) then
+add_bufnr_to_history = function(bufnr)
+	if not is_trackable_buffer(bufnr) then
 		return
-	end
-	local buftype = vim.api.nvim_buf_get_option(bufnr, "buftype")
-	if buftype ~= "" then
-		return
-	end
-	local name = vim.api.nvim_buf_get_name(bufnr)
-	if name == nil then
-		name = ""
 	end
 	M.current_buffer = bufnr
 	upsert_buffer_history({
 		index = bufnr,
-		name = name,
+		kind = get_buffer_kind(bufnr),
+		name = get_buffer_name(bufnr),
 	})
 end
 
 M.filter = function()
-	local all_bufs = vim.api.nvim_list_bufs()
-	local open_bufs = {}
-	for i = 1, #all_bufs do
-		if vim.api.nvim_buf_is_loaded(all_bufs[i]) then
-			local name = vim.api.nvim_buf_get_name(all_bufs[i])
-			local buftype = vim.api.nvim_buf_get_option(all_bufs[i], "buftype")
-			if buftype == "" then
-				if #name > 0 and name:sub(1, 1) == "/" then
-					table.insert(open_bufs, all_bufs[i])
-				elseif #name == 0 then
-					table.insert(open_bufs, all_bufs[i])
-				end
-			end
-		end
-	end
+	local tracked_bufs = list_trackable_buffers()
 
 	local filtered = {}
 	for i = 1, #M.buffer_history do
 		local buffer = M.buffer_history[i]
-		if vim.tbl_contains(open_bufs, buffer.index) then
+		if vim.tbl_contains(tracked_bufs, buffer.index) then
 			table.insert(filtered, buffer)
 		end
 	end
@@ -84,18 +145,15 @@ end
 
 M.get_buffer = function()
 	local index = vim.api.nvim_get_current_buf()
-	local name = vim.api.nvim_buf_get_name(index)
-	local buffer_type = vim.api.nvim_buf_get_option(index, "buftype")
-	if buffer_type ~= "" then
+	local kind = get_buffer_kind(index)
+	if kind == nil then
 		return nil
-	end
-	if name == nil then
-		name = ""
 	end
 	M.current_buffer = index
 	return {
 		index = index,
-		name = name,
+		kind = kind,
+		name = get_buffer_name(index),
 	}
 end
 
@@ -105,6 +163,7 @@ M.on_enter = function()
 	if buffer == nil then
 		return
 	end
+	ensure_terminal_fallback(buffer)
 	upsert_buffer_history(buffer)
 
 	M.save_storage()
@@ -227,10 +286,12 @@ M.load_storage = function()
 
 	local contents = M.load_storage_contents()
 	local items = contents[vim.fn.getcwd()]
-	if items == nil then
+	if items == nil or #items == 0 then
 		M.loaded = true
+		M.on_enter()
 		return
 	end
+	M.buffer_history = {}
 	for i = 1, #items do
 		local item = items[i]
 		if item["name"] ~= nil and item["name"] ~= "" then
@@ -254,6 +315,7 @@ M.load_storage = function()
 	end
 
 	M.loaded = true
+	vim.cmd("redrawtabline")
 end
 
 M.save_storage = function()
@@ -271,7 +333,7 @@ M.save_storage = function()
 	local session = {}
 	for i = 1, #M.buffer_history do
 		local item = M.buffer_history[i]
-		if item.name ~= "" then
+		if item.kind == "file" and item.name ~= "" then
 			local row = {}
 			row["name"] = item.name
 			row["line"] = vim.api.nvim__buf_stats(item.index).current_lnum or 0
@@ -320,6 +382,13 @@ M.setup = function(options)
 		callback = M.on_enter,
 	})
 
+	-- terminal buffers do not always trigger the same enter flow as file buffers
+	vim.api.nvim_create_autocmd({ "TermOpen", "TermEnter" }, {
+		group = "stacker",
+		pattern = "*",
+		callback = M.on_enter,
+	})
+
 	-- on close
 	vim.api.nvim_create_autocmd("BufDelete", {
 		group = "stacker",
@@ -362,12 +431,14 @@ M.setup = function(options)
 		callback = M.load_storage,
 	})
 
-	vim.defer_fn(M.load_storage, 0)
-
 	if M.opts.show_tabline then
 		vim.opt.showtabline = 2
 		vim.o.tabline = "%!v:lua.require'stacker'.status()"
 	end
+
+	M.on_enter()
+
+	vim.defer_fn(M.load_storage, 0)
 end
 
 M.list_buffers = function()
@@ -383,7 +454,7 @@ M.list_buffers = function()
 	end
 	for i = 1, #M.buffer_history do
 		local buffer = M.buffer_history[i]
-		local name = buffer.name
+		local name = get_buffer_label(buffer)
 		if name ~= "" then
 			table.insert(buffer_list, name)
 		else

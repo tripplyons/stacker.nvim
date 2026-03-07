@@ -4,6 +4,8 @@ Access recent Neovim buffers, ordered by most recently used
 
 Inspired by [harpoon](https://github.com/ThePrimeagen/harpoon)
 
+`stacker.nvim` tracks regular file buffers and `:terminal` buffers in the same MRU stack, so you can switch back to terminal tabs with the same mappings you use for files. Terminal buffers are session-local and are not restored from storage.
+
 ## Demo Video
 
 [![Video Screenshot](video-screenshot.png)](https://www.youtube.com/watch?v=d6I0_qKfosg)
