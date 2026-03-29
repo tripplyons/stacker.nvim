@@ -108,26 +108,6 @@ local function get_buffer_history_index(bufnr)
 	return nil
 end
 
-local function get_ordered_buffer_history()
-	if M.opts.sort_buffers or #M.buffer_history < 2 then
-		return M.buffer_history
-	end
-
-	local current_index = get_buffer_history_index(M.current_buffer)
-	if current_index == nil or current_index == #M.buffer_history then
-		return M.buffer_history
-	end
-
-	local ordered = {}
-	for i = current_index + 1, #M.buffer_history do
-		table.insert(ordered, M.buffer_history[i])
-	end
-	for i = 1, current_index do
-		table.insert(ordered, M.buffer_history[i])
-	end
-	return ordered
-end
-
 local function upsert_buffer_history(buffer)
 	if buffer == nil then
 		return
@@ -224,12 +204,26 @@ end
 
 M.navigate = function(index)
 	M.filter()
-	local buffer_history = get_ordered_buffer_history()
-	if index > #buffer_history + 1 then
+	local buffer_history = M.buffer_history
+	if M.opts.sort_buffers then
+		if index > #buffer_history + 1 then
+			print("index out of range")
+			return
+		end
+		local buffer = buffer_history[#buffer_history - index]
+		if not buffer then
+			print("buffer not found")
+			return
+		end
+		vim.cmd("buffer " .. buffer.index)
+		M.save_storage()
+		return
+	end
+	if index > #buffer_history then
 		print("index out of range")
 		return
 	end
-	local buffer = buffer_history[#buffer_history - index]
+	local buffer = buffer_history[index]
 	if not buffer then
 		print("buffer not found")
 		return
@@ -472,7 +466,7 @@ end
 
 M.list_buffers = function()
 	M.filter()
-	local buffer_history = get_ordered_buffer_history()
+	local buffer_history = M.buffer_history
 	local buffer_list = {}
 	-- figure out which buffers are unnamed
 	local no_name_indices = {}
@@ -581,6 +575,23 @@ M.status = function()
 
 	if #filenames == 0 then
 		return ""
+	end
+
+	if not M.opts.sort_buffers then
+		local statusline = ""
+		for i = 1, #filenames do
+			if i > 1 then
+				statusline = statusline .. "%#StackerSeparator#" .. M.opts.separator
+			end
+			statusline = statusline .. "%#StackerNumber#" .. i .. " "
+			if M.buffer_history[i] ~= nil and M.buffer_history[i].index == M.current_buffer then
+				statusline = statusline .. "%#StackerActive#"
+			else
+				statusline = statusline .. "%#StackerInactive#"
+			end
+			statusline = statusline .. filenames[i]
+		end
+		return statusline
 	end
 
 	local statusline = "%#StackerActive#" .. filenames[#filenames]

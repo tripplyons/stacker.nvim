@@ -59,7 +59,7 @@ First install the plugin (using [lazy.nvim](https://github.com/folke/lazy.nvim),
 {
   max_buffers = 10,
   separator = '  ',
-  sort_buffers = true, -- automatically reorder buffers as you enter them
+  sort_buffers = true, -- automatically reorder buffers as you enter them; when false, tabline order stays fixed and new buffers append at the end
   show_tabline = true,
   storage_path = vim.fn.stdpath('data') .. '/stacker.json',
   load_cursor_position = false, -- go to the line where the buffer was last left, if using storage
