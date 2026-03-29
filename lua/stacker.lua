@@ -3,6 +3,7 @@ local M = {}
 local default_opts = {
 	max_buffers = 10,
 	separator = "  ",
+	sort_buffers = true,
 	show_tabline = true,
 	storage_path = vim.fn.stdpath("data") .. "/stacker.json",
 	load_cursor_position = false,
@@ -98,20 +99,51 @@ local function ensure_terminal_fallback(buffer)
 	add_bufnr_to_history(bufnr)
 end
 
+local function get_buffer_history_index(bufnr)
+	for i = 1, #M.buffer_history do
+		if bufnr == M.buffer_history[i].index then
+			return i
+		end
+	end
+	return nil
+end
+
+local function get_ordered_buffer_history()
+	if M.opts.sort_buffers or #M.buffer_history < 2 then
+		return M.buffer_history
+	end
+
+	local current_index = get_buffer_history_index(M.current_buffer)
+	if current_index == nil or current_index == #M.buffer_history then
+		return M.buffer_history
+	end
+
+	local ordered = {}
+	for i = current_index + 1, #M.buffer_history do
+		table.insert(ordered, M.buffer_history[i])
+	end
+	for i = 1, current_index do
+		table.insert(ordered, M.buffer_history[i])
+	end
+	return ordered
+end
+
 local function upsert_buffer_history(buffer)
 	if buffer == nil then
 		return
 	end
-	local index = -1
-	for i = 1, #M.buffer_history do
-		if buffer.index == M.buffer_history[i].index then
-			index = i
-			break
+
+	local index = get_buffer_history_index(buffer.index)
+	if index ~= nil then
+		if M.opts.sort_buffers then
+			table.remove(M.buffer_history, index)
+			table.insert(M.buffer_history, buffer)
+		else
+			M.buffer_history[index] = buffer
 		end
+		return
 	end
-	if index ~= -1 then
-		table.remove(M.buffer_history, index)
-	end
+
 	table.insert(M.buffer_history, buffer)
 	if #M.buffer_history > M.opts.max_buffers then
 		table.remove(M.buffer_history, 1)
@@ -181,27 +213,23 @@ end
 
 M.on_delete = function(buffer)
 	local bufnr = buffer.buf
-	local index = -1
-
-	for i = 1, #M.buffer_history do
-		if bufnr == M.buffer_history[i].index then
-			index = i
-			break
-		end
-	end
-
-	if index ~= -1 then
+	local index = get_buffer_history_index(bufnr)
+	if index ~= nil then
 		table.remove(M.buffer_history, index)
+	end
+	if bufnr == M.current_buffer then
+		M.current_buffer = nil
 	end
 end
 
 M.navigate = function(index)
 	M.filter()
-	if index > #M.buffer_history + 1 then
+	local buffer_history = get_ordered_buffer_history()
+	if index > #buffer_history + 1 then
 		print("index out of range")
 		return
 	end
-	local buffer = M.buffer_history[#M.buffer_history - index]
+	local buffer = buffer_history[#buffer_history - index]
 	if not buffer then
 		print("buffer not found")
 		return
@@ -358,7 +386,8 @@ M.on_buffer_write = function()
 		return
 	end
 	-- update buffer name if it has changed
-	if #M.buffer_history == 0 or buffer.name ~= M.buffer_history[#M.buffer_history].name then
+	local index = get_buffer_history_index(buffer.index)
+	if index == nil or buffer.name ~= M.buffer_history[index].name then
 		M.on_enter()
 		vim.cmd("redrawtabline")
 	end
@@ -443,17 +472,18 @@ end
 
 M.list_buffers = function()
 	M.filter()
+	local buffer_history = get_ordered_buffer_history()
 	local buffer_list = {}
 	-- figure out which buffers are unnamed
 	local no_name_indices = {}
-	for i = 1, #M.buffer_history do
-		local buffer = M.buffer_history[i]
+	for i = 1, #buffer_history do
+		local buffer = buffer_history[i]
 		if buffer.name == "" then
 			table.insert(no_name_indices, buffer.index)
 		end
 	end
-	for i = 1, #M.buffer_history do
-		local buffer = M.buffer_history[i]
+	for i = 1, #buffer_history do
+		local buffer = buffer_history[i]
 		local name = get_buffer_label(buffer)
 		if name ~= "" then
 			table.insert(buffer_list, name)
