@@ -4,7 +4,7 @@ Access recent Neovim buffers, ordered by most recently used
 
 Inspired by [harpoon](https://github.com/ThePrimeagen/harpoon)
 
-`stacker.nvim` tracks regular file buffers and `:terminal` buffers in the same MRU stack, so you can switch back to terminal tabs with the same mappings you use for files. Terminal buffers are session-local and are not restored from storage.
+`stacker.nvim` tracks regular file buffers and `:terminal` buffers in the same MRU stack, so you can switch back to terminal tabs with the same mappings you use for files. Terminal buffers are tracked in the MRU list, but only file buffers are restored from storage.
 
 ## Demo Video
 
@@ -62,8 +62,9 @@ First install the plugin (using [lazy.nvim](https://github.com/folke/lazy.nvim),
   sort_buffers = true, -- automatically reorder buffers as you enter them; when false, tabline order stays fixed and new buffers append at the end
   show_tabline = true,
   storage_path = vim.fn.stdpath('data') .. '/stacker.json',
-  load_cursor_position = false, -- go to the line where the buffer was last left, if using storage
-  use_storage = true, -- store the buffer history in storage_path
+  load_cursor_position = false, -- restore the last cursor position for stored file buffers
+  use_storage = true, -- persist buffer history by default
 }
 ```
 
+Storage is scoped per working directory/project key, so each project keeps its own buffer history. When storage is enabled, file buffers are restored by path; if `load_cursor_position = true`, their cursor position is restored too. Explicit argv files always take precedence over storage on startup.

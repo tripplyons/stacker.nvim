@@ -16,8 +16,10 @@ M.buffer_history = {}
 M.current_buffer = nil
 M.opts = {}
 M.argv_session = false
+M.loading_storage = false
 
 local add_bufnr_to_history
+local argv_startup_handled = false
 
 local function get_buffer_kind(bufnr)
 	if bufnr == nil or not vim.api.nvim_buf_is_valid(bufnr) then
@@ -43,6 +45,217 @@ local function get_buffer_name(bufnr)
 		return ""
 	end
 	return name
+end
+
+local function normalize_path(path)
+	if path == nil or path == "" then
+		return ""
+	end
+	return vim.fn.fnamemodify(path, ":p")
+end
+
+local function normalize_project_key(path)
+	local normalized = normalize_path(path)
+	if normalized == "" then
+		return ""
+	end
+	if normalized ~= "/" then
+		normalized = normalized:gsub("/+$", "")
+	end
+	return normalized
+end
+
+local function get_project_key_variants()
+	local cwd = vim.fn.getcwd()
+	local normalized = normalize_project_key(cwd)
+	if normalized == "" or normalized == cwd then
+		return { cwd }
+	end
+	return { normalized, cwd }
+end
+
+local function get_project_key()
+	return normalize_project_key(vim.fn.getcwd())
+end
+
+local function is_path_in_current_project(path, project_key)
+	local normalized = normalize_path(path)
+	if normalized == "" or project_key == "" then
+		return false
+	end
+	if project_key == "/" then
+		return normalized:sub(1, 1) == "/"
+	end
+	if normalized == project_key then
+		return true
+	end
+	return normalized:sub(1, #project_key + 1) == project_key .. "/"
+end
+
+local function ensure_parent_dir(path)
+	local dir = vim.fn.fnamemodify(path, ":h")
+	if dir ~= nil and dir ~= "" then
+		pcall(vim.fn.mkdir, dir, "p")
+	end
+end
+
+local function cleanup_temp_file(path, file)
+	if file ~= nil then
+		pcall(function()
+			file:close()
+		end)
+	end
+	if path ~= nil and path ~= "" then
+		pcall(os.remove, path)
+	end
+end
+
+local function write_file_atomic(path, data)
+	local temp_path = path .. "." .. tostring(vim.loop.hrtime()) .. ".tmp"
+	local file, open_err = io.open(temp_path, "w")
+	if file == nil then
+		return false, open_err
+	end
+
+	local ok, write_err = file:write(data)
+	if ok == nil then
+		cleanup_temp_file(temp_path, file)
+		return false, write_err
+	end
+
+	local close_ok, close_err = file:close()
+	if not close_ok then
+		cleanup_temp_file(temp_path)
+		return false, close_err
+	end
+
+	local rename_ok, rename_err = os.rename(temp_path, path)
+	if not rename_ok then
+		cleanup_temp_file(temp_path)
+		return false, rename_err
+	end
+
+	return true
+end
+
+local function clamp(value, min_value, max_value)
+	if value == nil then
+		return min_value
+	end
+	if value < min_value then
+		return min_value
+	end
+	if value > max_value then
+		return max_value
+	end
+	return value
+end
+
+local function get_buffer_context(bufnr)
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return nil
+	end
+
+	local row, col = 1, 0
+	if bufnr == vim.api.nvim_get_current_buf() then
+		local cursor = vim.api.nvim_win_get_cursor(0)
+		row = cursor[1] or 1
+		col = cursor[2] or 0
+	else
+		local ok, mark = pcall(vim.api.nvim_buf_get_mark, bufnr, '"')
+		if ok and type(mark) == "table" and mark[1] ~= nil and mark[1] > 0 then
+			row = mark[1]
+			col = mark[2] or 0
+		end
+	end
+
+	local line_count = vim.api.nvim_buf_line_count(bufnr)
+	if line_count < 1 then
+		line_count = 1
+	end
+	row = clamp(row, 1, line_count)
+
+	local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
+	col = clamp(col, 0, #line)
+
+	return {
+		row = row,
+		col = col,
+	}
+end
+
+local function normalize_session_item(item)
+	if type(item) ~= "table" then
+		return nil
+	end
+
+	local value = item.value
+	if type(value) ~= "string" or value == "" then
+		value = item.name
+	end
+	if type(value) ~= "string" or value == "" then
+		return nil
+	end
+
+	local context = item.context
+	if type(context) ~= "table" then
+		local line = tonumber(item.line) or 1
+		context = {
+			row = line,
+			col = 0,
+		}
+	end
+
+	return {
+		value = normalize_path(value),
+		context = {
+			row = tonumber(context.row or context.line) or 1,
+			col = tonumber(context.col) or 0,
+		},
+	}
+end
+
+local function get_storage_session(contents)
+	if type(contents) ~= "table" then
+		return {}
+	end
+
+	local variants = get_project_key_variants()
+	for i = 1, #variants do
+		local session = contents[variants[i]]
+		if type(session) == "table" then
+			return session
+		end
+	end
+
+	return {}
+end
+
+local function restore_cursor_position(bufnr, context)
+	if not M.opts.load_cursor_position or type(context) ~= "table" then
+		return
+	end
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return
+	end
+
+	local row = tonumber(context.row) or 1
+	local col = tonumber(context.col) or 0
+	local line_count = vim.api.nvim_buf_line_count(bufnr)
+	if line_count < 1 then
+		line_count = 1
+	end
+	row = clamp(row, 1, line_count)
+	local line = vim.api.nvim_buf_get_lines(bufnr, row - 1, row, false)[1] or ""
+	col = clamp(col, 0, #line)
+
+	vim.api.nvim_win_set_cursor(0, { row, col })
+end
+
+local function make_buffer_current(bufnr)
+	if vim.api.nvim_buf_is_valid(bufnr) then
+		vim.api.nvim_set_current_buf(bufnr)
+	end
 end
 
 local function get_buffer_label(buffer)
@@ -178,7 +391,7 @@ M.on_enter = function()
 	ensure_terminal_fallback(buffer)
 	upsert_buffer_history(buffer)
 
-	M.save_storage()
+	M.save_storage({ from_enter = true })
 
 	vim.cmd("redrawtabline")
 end
@@ -238,19 +451,22 @@ M.load_storage_contents = function()
 	if file == nil then
 		return {}
 	end
-	local contents = file:read("*all")
-	if contents == "" then
+	local ok, contents = pcall(function()
+		local data = file:read("*all")
+		if data == nil or data == "" then
+			return {}
+		end
+		local decoded = vim.json.decode(data)
+		if type(decoded) ~= "table" then
+			return {}
+		end
+		return decoded
+	end)
+	file:close()
+	if not ok or type(contents) ~= "table" then
 		return {}
 	end
-	file:close()
-	return vim.json.decode(contents)
-end
-
-local function normalize_path(path)
-	if path == nil or path == "" then
-		return ""
-	end
-	return vim.fn.fnamemodify(path, ":p")
+	return contents
 end
 
 local function load_file_buffer(path)
@@ -258,16 +474,29 @@ local function load_file_buffer(path)
 	if normalized == "" then
 		return nil
 	end
-	local bufnr = vim.fn.bufadd(normalized)
-	vim.fn.bufload(bufnr)
+	if vim.fn.filereadable(normalized) ~= 1 then
+		return nil
+	end
+	local ok, bufnr = pcall(vim.fn.bufadd, normalized)
+	if not ok then
+		return nil
+	end
+	if not pcall(vim.fn.bufload, bufnr) then
+		return nil
+	end
+	pcall(vim.api.nvim_buf_set_option, bufnr, "buflisted", true)
 	return bufnr
 end
 
 local function load_startup_files_from_argv()
+	if argv_startup_handled then
+		return false
+	end
 	local argv = vim.fn.argv()
 	if #argv == 0 then
 		return false
 	end
+	local had_argv = true
 	local loaded_any = false
 	local loaded_bufs = {}
 	for i = 1, #argv do
@@ -289,89 +518,130 @@ local function load_startup_files_from_argv()
 		add_bufnr_to_history(vim.api.nvim_get_current_buf())
 		vim.cmd("redrawtabline")
 	end
-	return loaded_any
+	argv_startup_handled = true
+	M.argv_session = true
+	return had_argv
 end
 
-M.load_storage = function()
+M.load_storage = function(options)
+	if M.loading_storage then
+		return
+	end
+	local from_dir_changed = type(options) == "table" and options.from_dir_changed == true
+	M.loading_storage = true
+	local function finish_loading()
+		M.loading_storage = false
+	end
 	-- If nvim was launched with explicit file arguments, honor that set first
 	-- and avoid replacing the startup layout with storage restores.
-	if load_startup_files_from_argv() then
+	if not M.loaded and load_startup_files_from_argv() then
 		M.argv_session = true
 		M.loaded = true
+		finish_loading()
 		return
 	end
 
 	if not M.opts.use_storage then
 		M.loaded = true
+		finish_loading()
 		return
 	end
 
 	local contents = M.load_storage_contents()
-	local items = contents[vim.fn.getcwd()]
+	local items = get_storage_session(contents)
 	if items == nil or #items == 0 then
 		M.loaded = true
+		if from_dir_changed then
+			M.buffer_history = {}
+			M.current_buffer = nil
+			finish_loading()
+			vim.cmd("redrawtabline")
+			return
+		end
+		finish_loading()
 		M.on_enter()
 		return
 	end
 	M.buffer_history = {}
+	M.current_buffer = nil
+	local last_loaded = nil
+	local last_context = nil
 	for i = 1, #items do
-		local item = items[i]
-		if item["name"] ~= nil and item["name"] ~= "" then
-			local bufnr = load_file_buffer(item["name"])
+		local item = normalize_session_item(items[i])
+		if item ~= nil then
+			local bufnr = load_file_buffer(item.value)
 			if bufnr ~= nil then
 				add_bufnr_to_history(bufnr)
-				if i == #items then
-					vim.api.nvim_set_current_buf(bufnr)
-					add_bufnr_to_history(bufnr)
-				end
+				last_loaded = bufnr
+				last_context = item.context
 			end
 		end
-		if M.opts.load_cursor_position then
-			local line = item["line"]
-			local max_line = tonumber(vim.fn.system({ "wc", "-l", vim.fn.expand("%") }):match("%d+"))
-			if line > max_line then
-				line = max_line
-			end
-			vim.cmd("normal! " .. line .. "gg0")
-		end
+	end
+	if last_loaded ~= nil then
+		make_buffer_current(last_loaded)
+		restore_cursor_position(last_loaded, last_context)
 	end
 
 	M.loaded = true
+	finish_loading()
 	vim.cmd("redrawtabline")
 end
 
-M.save_storage = function()
-	M.filter()
-	if M.argv_session then
-		return
+local function build_session_item(bufnr)
+	if not vim.api.nvim_buf_is_valid(bufnr) then
+		return nil
 	end
+
+	local path = normalize_path(get_buffer_name(bufnr))
+	if path == "" then
+		return nil
+	end
+
+	local context = get_buffer_context(bufnr)
+	if context == nil then
+		context = {
+			row = 1,
+			col = 0,
+		}
+	end
+
+	return {
+		value = path,
+		context = context,
+	}
+end
+
+M.save_storage = function(options)
+	local from_enter = type(options) == "table" and options.from_enter == true
+	M.filter()
 	if not M.opts.use_storage then
 		return
 	end
-	if not M.loaded then
+	if M.loading_storage then
+		return
+	end
+	if from_enter and not M.loaded then
 		return
 	end
 	local contents = M.load_storage_contents()
 	local session = {}
+	local project_key = get_project_key()
 	for i = 1, #M.buffer_history do
 		local item = M.buffer_history[i]
-		if item.kind == "file" and item.name ~= "" then
-			local row = {}
-			row["name"] = item.name
-			row["line"] = vim.api.nvim__buf_stats(item.index).current_lnum or 0
-			table.insert(session, row)
+		if item.kind == "file" then
+			local session_item = build_session_item(item.index)
+			if session_item ~= nil and is_path_in_current_project(session_item.value, project_key) then
+				table.insert(session, session_item)
+			end
 		end
 	end
-	contents[vim.fn.getcwd()] = session
-	local file = io.open(M.opts.storage_path, "w+")
-	if file == nil then
+	contents[project_key] = session
+	local ok, encoded = pcall(vim.json.encode, contents)
+	if not ok then
 		return
 	end
-	local result = file:write(vim.json.encode(contents))
-	if result == nil then
-		return
-	end
-	file:close()
+	ensure_parent_dir(M.opts.storage_path)
+	write_file_atomic(M.opts.storage_path, encoded)
 end
 
 M.on_buffer_write = function()
@@ -389,6 +659,7 @@ end
 
 M.setup = function(options)
 	M.opts = vim.tbl_extend("force", default_opts, options or {})
+	M.argv_session = #vim.fn.argv() > 0
 
 	-- autocmds
 
@@ -451,7 +722,9 @@ M.setup = function(options)
 	vim.api.nvim_create_autocmd("DirChanged", {
 		group = "stacker",
 		pattern = "*",
-		callback = M.load_storage,
+		callback = function()
+			M.load_storage({ from_dir_changed = true })
+		end,
 	})
 
 	if M.opts.show_tabline then
